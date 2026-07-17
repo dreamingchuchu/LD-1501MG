@@ -1,0 +1,32 @@
+# Debug folder
+Debug/
+
+# Settings
+.settings/
+
+# Build artifacts
+*.o
+*.d
+*.map
+*.list
+*.elf
+*.bin
+*.hex
+
+# Eclipse/STM32CubeIDE
+.cproject
+.project
+.mxproject
+.merkle-snapshot.json
+.arts/
+
+# PDF files
+*.pdf
+
+# Backup files
+*~
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
