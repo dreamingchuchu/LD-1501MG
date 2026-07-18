@@ -30,6 +30,8 @@ Release/
 *.hex
 *.bin
 *.elf
+*.map
+*.list
 
 # Logs
 *.log
@@ -39,3 +41,17 @@ Release/
 .arts/
 .theia/
 .merkle-snapshot.json
+
+# Settings
+.settings/
+
+# Eclipse/STM32CubeIDE
+.cproject
+.project
+.mxproject
+
+# PDF files
+*.pdf
+
+# Backup files
+*.bak
