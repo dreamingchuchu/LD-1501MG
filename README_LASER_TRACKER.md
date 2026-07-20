@@ -127,6 +127,21 @@ python main_controller.py --openmv-port /dev/ttyACM0 --mcu-port /dev/ttyAMA0
 | GND | 舵机GND（棕色线） | 共地 |
 | 5V/6V | 舵机VCC（红色线） | 外部电源供电 |
 
+#### 4. MCU ← → OLED显示屏
+
+| MCU | OLED | 说明 |
+|-----|------|------|
+| PB8 | SCL | I2C时钟线 |
+| PB9 | SDA | I2C数据线 |
+| 3.3V | VCC | 电源 |
+| GND | GND | 地 |
+
+**OLED参数：**
+- 型号：0.96寸 SSD1306
+- 接口：I2C（软件模拟）
+- I2C地址：0x3C（7位地址）或0x78（8位写地址）
+- 分辨率：128×64
+
 ### 树莓派引脚图
 
 ```
