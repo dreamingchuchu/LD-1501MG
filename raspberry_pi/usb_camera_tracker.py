@@ -1,24 +1,7 @@
 """
-usb_camera_tracker.py — 树莓派 USB 摄像头红色激光检测 (生产版)
-================================================================
-6 阶段识别流水线 + 过曝高亮兜底:
-  1. HSV 双通道红色筛选
-  2. 形态学去噪
-  3. 找轮廓 + 计算特征
-  4. 面积过滤
-  5. 宽高比 + 圆度 + 亮度过滤
-  6. 连续性过滤 (★ 比赛最关键)
-
-公开接口 (与旧版完全兼容, 主控代码不需要改):
-  tracker.start()
-  tracker.update()
-  tracker.cx, tracker.cy, tracker.detected
-  tracker.get_position()      -> (cx, cy, detected)
-  tracker.get_error()         -> (ex, ey, detected)
-  tracker.stop()
-
-依赖:
-  pip install opencv-python numpy
+usb_camera_tracker.py - 树莓派USB摄像头红色激光检测
+功能: 使用USB摄像头实时检测红色激光光斑位置，替代OpenMV
+依赖: pip install opencv-python numpy
 """
 
 import cv2
@@ -26,64 +9,54 @@ import numpy as np
 import time
 import logging
 
-from detection_config import DetectionConfig
-from laser_detector import LaserDetector
-
 logger = logging.getLogger(__name__)
 
 
 class USBCameraTracker:
-    """USB 摄像头红色激光追踪器 (6 阶段识别版)"""
+    """USB摄像头红色激光追踪器"""
 
-    def __init__(self, camera_index=0, width=320, height=240, config=None):
+    def __init__(self, camera_index=0, width=320, height=240):
         """
+        初始化USB摄像头追踪器
+
         Args:
-            camera_index: 摄像头索引
-            width:  图像宽度
+            camera_index: 摄像头索引（默认0，如果有多个摄像头可以尝试1,2...）
+            width: 图像宽度
             height: 图像高度
-            config: DetectionConfig 实例 (None = 用默认配置)
         """
         self.camera_index = camera_index
         self.width = width
         self.height = height
 
-        # ─── 内部状态 ───
         self._cap = None
         self._cx = -1
         self._cy = -1
         self._detected = False
         self._timestamp = 0.0
 
+        self.min_blob_area = 3      # 降低最小面积, 远距离小光斑也要抓到
+        self.max_blob_area = 5000    # 放宽上限, 近距离大光斑不能跳过
+
         self.center_x = width // 2
         self.center_y = height // 2
 
-        # ─── 6 阶段识别流水线 ───
-        self._cfg = config or DetectionConfig()
-        self._detector = LaserDetector(self._cfg)
-
-        # ─── 兜底: 过曝高亮检测 (远距离激光发白) ───
-        self._brightness_fallback = True
-        self._bright_min_v = 240   # 远距离激光过曝, V>240
-        self._bright_max_area = 200  # 兜底只接受很小的亮区 (激光特征)
-
-        # ─── 调试显示 ───
-        self._debug = True   # 默认显示 GUI, 无显示器自动关闭
-
-    # ════════════════════════════════════════════════════
-    #  摄像头控制
-    # ════════════════════════════════════════════════════
+        self._debug = True   # 默认显示GUI，若cv2.imshow抛异常则自动关闭
 
     def start(self):
         """打开摄像头"""
         try:
             self._cap = cv2.VideoCapture(self.camera_index)
+
             if not self._cap.isOpened():
                 logger.error(f"无法打开摄像头 {self.camera_index}")
                 return False
+
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            logger.info(f"USB 摄像头已打开: {self.width}x{self.height}")
+
+            logger.info(f"USB摄像头已打开: {self.width}x{self.height}")
             return True
+
         except Exception as e:
             logger.error(f"摄像头初始化失败: {e}")
             return False
@@ -94,64 +67,76 @@ class USBCameraTracker:
             self._cap.release()
             logger.info("摄像头已关闭")
 
-    # ════════════════════════════════════════════════════
-    #  识别主入口
-    # ════════════════════════════════════════════════════
-
     def detect_red_laser(self, frame):
         """
-        检测红色激光光斑 (6 阶段流水线 + 过曝高亮兜底)
+        检测红色激光光斑 (双通道: 红色HSV + 过曝高亮兜底)
+
+        远距离激光在廉价摄像头上会过曝发白(H信息丢失),
+        所以加了亮度通道兜底: 检测画面中最亮的极小区域。
+
+        Args:
+            frame: BGR格式的图像帧
 
         Returns:
-            (cx, cy, detected)
-        """
-        # ─── 主通道: 6 阶段流水线 ───
-        cx, cy, detected, _info = self._detector.detect(frame)
-
-        # ─── 兜底: 远距离激光过曝发白 (H 信息丢失) ───
-        if not detected and self._brightness_fallback:
-            cx, cy, detected = self._brightness_detect(frame)
-
-        return cx, cy, detected
-
-    def _brightness_detect(self, frame):
-        """
-        过曝高亮兜底检测
-        远距离激光在廉价摄像头上会过曝发白 (H 信息丢失),
-        此时 V 通道 > 240, 而 S 通道 < 50 (饱和度反而下降).
-        只接受很小面积的亮区, 排除灯光 / 窗户等大面积高亮.
+            (cx, cy, detected): 质心坐标和检测状态
         """
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        _, _, v = cv2.split(hsv)
-        _, mask = cv2.threshold(v, self._bright_min_v, 255, cv2.THRESH_BINARY)
 
-        # 去噪
+        # ─── 通道1: HSV红色检测 (正常距离) ──────────────────
+        lower_red1 = np.array([0, 50, 80])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([160, 50, 80])
+        upper_red2 = np.array([180, 255, 255])
+
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        red_mask = mask1 + mask2
+
+        # ─── 通道2: 过曝高亮检测 (远距离, 激光发白) ──────────
+        # 取V通道中极亮的像素 (V>240), 且面积很小 (激光点特征)
+        _, _, v_channel = cv2.split(hsv)
+        _, bright_mask = cv2.threshold(v_channel, 240, 255, cv2.THRESH_BINARY)
+
+        # ─── 合并两个通道 ───────────────────────────────────
+        mask = cv2.bitwise_or(red_mask, bright_mask)
+
         kernel = np.ones((3, 3), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         if not contours:
             return -1, -1, False
 
-        # 取最小面积的亮区 (激光点特征: 面积小)
-        best = min(contours, key=cv2.contourArea)
-        area = cv2.contourArea(best)
-        if area < 1 or area > self._bright_max_area:
+        best_contour = None
+        max_area = 0
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if self.min_blob_area <= area <= self.max_blob_area and area > max_area:
+                max_area = area
+                best_contour = contour
+
+        if best_contour is None:
             return -1, -1, False
 
-        M = cv2.moments(best)
+        M = cv2.moments(best_contour)
         if M["m00"] == 0:
             return -1, -1, False
 
-        return int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]), True
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
 
-    # ════════════════════════════════════════════════════
-    #  帧更新
-    # ════════════════════════════════════════════════════
+        # 额外校验: 排除大块高亮区域 (灯、窗户反光等)
+        if max_area > self.max_blob_area * 0.8:
+            return -1, -1, False
+
+        return cx, cy, True
 
     def update(self):
         """
-        更新检测状态 (每帧调用一次)
+        更新检测状态（每帧调用一次）
 
         Returns:
             bool: 是否成功获取帧
@@ -175,37 +160,33 @@ class USBCameraTracker:
             try:
                 self._draw_debug(frame, cx, cy, detected)
             except Exception:
-                logger.warning("无法显示 GUI 窗口 (可能无显示器), 自动关闭画面预览")
+                logger.warning("无法显示GUI窗口(可能无显示器), 自动关闭画面预览")
                 self._debug = False
 
         return True
 
     def _draw_debug(self, frame, cx, cy, detected):
-        """绘制调试信息 (中心十字 + 目标点 + 状态)"""
-        h, w = frame.shape[:2]
-        cv2.line(frame, (self.center_x, 0), (self.center_x, h), (255, 255, 255), 1)
-        cv2.line(frame, (0, self.center_y), (w, self.center_y), (255, 255, 255), 1)
+        """绘制调试信息"""
+        cv2.line(frame, (self.center_x, 0), (self.center_x, self.height), (255, 255, 255), 1)
+        cv2.line(frame, (0, self.center_y), (self.width, self.center_y), (255, 255, 255), 1)
 
         if detected:
             cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
             cv2.circle(frame, (cx, cy), 10, (0, 255, 0), 2)
             cv2.line(frame, (self.center_x, self.center_y), (cx, cy), (0, 0, 255), 2)
+
             error_x = cx - self.center_x
             error_y = cy - self.center_y
-            cv2.putText(frame, f"Error: ({error_x:+d}, {error_y:+d})", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(frame, f"Error: ({error_x}, {error_y})", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         status = "TRACKING" if detected else "LOST"
         color = (0, 255, 0) if detected else (0, 0, 255)
-        cv2.putText(frame, status, (10, h - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(frame, status, (10, self.height - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         cv2.imshow("Red Laser Tracker", frame)
         cv2.waitKey(1)
-
-    # ════════════════════════════════════════════════════
-    #  公开属性 (兼容旧版)
-    # ════════════════════════════════════════════════════
 
     @property
     def cx(self):
@@ -223,17 +204,25 @@ class USBCameraTracker:
     def timestamp(self):
         return self._timestamp
 
-    # ════════════════════════════════════════════════════
-    #  公开方法 (兼容旧版, 主控代码不需要改)
-    # ════════════════════════════════════════════════════
-
     def get_position(self):
-        """获取最新目标位置 -> (cx, cy, detected)"""
+        """
+        获取最新目标位置
+
+        Returns:
+            (cx, cy, detected): 光斑坐标和检测状态
+        """
         return (self._cx, self._cy, self._detected)
 
     def get_error(self, center_x=None, center_y=None):
         """
-        获取相对于画面中心的误差 -> (ex, ey, detected)
+        获取相对于画面中心的误差
+
+        Args:
+            center_x: 画面中心X（默认使用self.center_x）
+            center_y: 画面中心Y（默认使用self.center_y）
+
+        Returns:
+            (error_x, error_y, detected)
         """
         if center_x is None:
             center_x = self.center_x
@@ -242,7 +231,8 @@ class USBCameraTracker:
 
         if self._detected:
             return (self._cx - center_x, self._cy - center_y, True)
-        return (0, 0, False)
+        else:
+            return (0, 0, False)
 
     def is_stale(self, max_age=0.5):
         """检查数据是否过期"""
@@ -254,14 +244,9 @@ class USBCameraTracker:
         """设置调试模式"""
         self._debug = enable
 
-    # ════════════════════════════════════════════════════
-    #  旧版兼容 (不再使用, 保留以防旧代码引用)
-    # ════════════════════════════════════════════════════
-
-    @property
-    def min_blob_area(self):
-        return self._cfg.MIN_AREA
-
-    @property
-    def max_blob_area(self):
-        return self._cfg.MAX_AREA
+    def set_threshold(self, min_area=None, max_area=None):
+        """设置检测阈值"""
+        if min_area is not None:
+            self.min_blob_area = min_area
+        if max_area is not None:
+            self.max_blob_area = max_area

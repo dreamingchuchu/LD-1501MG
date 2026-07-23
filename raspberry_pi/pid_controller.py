@@ -41,8 +41,8 @@ class PIDConfig:
 class IncrementalPID:
     """增量式PID + 误差低通滤波"""
 
-    # 误差低通滤波系数 (参考国二: Err_Now*0.85 + Err_Last*0.15)
-    ERROR_FILTER_ALPHA = 0.15
+    # 误差低通滤波系数 (0.80/0.20, 时间常数~80ms, 比0.85/0.15更快响应)
+    ERROR_FILTER_ALPHA = 0.20
 
     def __init__(self, config: PIDConfig, name="PID"):
         self.cfg = config
@@ -120,6 +120,10 @@ class IncrementalPID:
         # ─── 输出限幅 ───
         delta = max(self.cfg.output_min,
                     min(self.cfg.output_max, delta))
+
+        # ─── 近端减速: 误差<20px时输出缩到30%, 防冲过头 ───
+        if abs(self._e_k) < 20.0:
+            delta *= 0.3
 
         # ─── 更新历史 ───
         self._e_k_2 = self._e_k_1

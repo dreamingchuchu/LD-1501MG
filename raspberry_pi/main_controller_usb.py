@@ -269,9 +269,9 @@ class TrackingControllerUSB:
             cmd_sent = False
 
             if (now - self._last_mcu_cmd_time) >= MCU_CMD_INTERVAL:
-                self.mcu.send_raw_command(f"P={int(self._current_target_pan)}")
-                time.sleep(0.05)
-                self.mcu.send_raw_command(f"T={int(self._current_target_tilt)}")
+                # ★ 连续发送, 不留sleep(STM32有硬件RX buffer, 不会丢)
+                self.mcu.send_raw_command(f"P={self._current_target_pan:.1f}")
+                self.mcu.send_raw_command(f"T={self._current_target_tilt:.1f}")
                 self._last_mcu_cmd_time = now
                 cmd_sent = True
 
