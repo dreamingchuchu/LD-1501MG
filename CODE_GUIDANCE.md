@@ -99,9 +99,9 @@ TIM2 参数配置（在下方的 Configuration 面板）：
 | Mode | PWM Mode 1 | |
 | Pulse (初始/* ====== 角度限幅（用户根据云台实际机械范围修改）====== */
 #define SERVO_PAN_MIN      0    // ← Pan 最小角度
-#define SERVO_PAN_MAX      225  // ← Pan 最大角度（写死为 180）
+#define SERVO_PAN_MAX      180  // ← Pan 最大角度（写死为 180）
 #define SERVO_TILT_MIN     0    // ← Tilt 最小角度
-#define SERVO_TILT_MAX     225  // ← Tilt 最大角度) | **1500** | 对应 90° 中位 |
+#define SERVO_TILT_MAX     180  // ← Tilt 最大角度) | **1500** | 对应 90° 中位 |
 | CH Polarity | High | |
 
 > **验证**：PWM 频率 = 72MHz / 72 / 20000 = **50Hz** ✅
