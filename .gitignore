@@ -1,32 +1,57 @@
-# Debug folder
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
 Debug/
+Release/
+*.o
+*.d
+*.hex
+*.bin
+*.elf
+*.map
+*.list
+
+# Logs
+*.log
+
+# Config
+.codeartsdoer/
+.arts/
+.theia/
+.merkle-snapshot.json
 
 # Settings
 .settings/
-
-# Build artifacts
-*.o
-*.d
-*.map
-*.list
-*.elf
-*.bin
-*.hex
 
 # Eclipse/STM32CubeIDE
 .cproject
 .project
 .mxproject
-.merkle-snapshot.json
-.arts/
 
 # PDF files
 *.pdf
 
 # Backup files
-*~
 *.bak
-
-# OS files
-.DS_Store
-Thumbs.db
